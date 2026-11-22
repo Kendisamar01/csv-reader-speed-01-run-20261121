@@ -9,162 +9,123 @@ export function run(input) {
   const rows = [];
   let columns = null;
   let width = -1;
-
   const len = text.length;
   let pos = text.charCodeAt(0) === 0xFEFF ? 1 : 0;
   let line = 1;
   let recordLine = 1;
   let recordRow = null;
-
   let fieldValue = '';
   let fieldEnded = END;
 
-  function addError(code) {
-    errors.push({ code, line: recordLine, row: recordRow });
-  }
-
   function readUnquoted(initial) {
-    let parts = null;
     let seg = pos;
-    let endPos = len;
-    let ended = END;
+    let prefix = initial;
     while (pos < len) {
-      const c = text.charCodeAt(pos);
-      if (c === 44) {
-        endPos = pos;
-        pos += 1;
-        ended = COMMA;
-        break;
-      }
-      if (c === 10) {
-        endPos = pos;
-        pos += 1;
-        line += 1;
-        ended = LINE_BREAK;
-        break;
-      }
-      if (c === 13) {
-        if (text.charCodeAt(pos + 1) === 10) {
-          endPos = pos;
-          pos += 2;
-          line += 1;
-          ended = LINE_BREAK;
-          break;
-        }
-        if (parts === null) parts = [text.slice(seg, pos)];
-        else parts.push(text.slice(seg, pos));
-        addError('stray_cr');
-        pos += 1;
-        seg = pos;
-        continue;
-      }
-      pos += 1;
+      let nc = text.indexOf(',', pos); if (nc === -1) nc = len;
+      let nl = text.indexOf('\n', pos); if (nl === -1) nl = len;
+      let nr = text.indexOf('\r', pos); if (nr === -1) nr = len;
+      let end = nc, kind = 0;
+      if (nl < end) { end = nl; kind = 1; }
+      if (nr < end) { end = nr; kind = 2; }
+      if (end === len) { fieldValue = prefix + text.slice(seg, len); pos = len; fieldEnded = END; return; }
+      if (kind === 0) { fieldValue = prefix + text.slice(seg, end); pos = end + 1; fieldEnded = COMMA; return; }
+      if (kind === 1) { fieldValue = prefix + text.slice(seg, end); pos = end + 1; line++; fieldEnded = LINE_BREAK; return; }
+      if (text.charCodeAt(end + 1) === 10) { fieldValue = prefix + text.slice(seg, end); pos = end + 2; line++; fieldEnded = LINE_BREAK; return; }
+      prefix += text.slice(seg, end);
+      errors.push({ code: 'stray_cr', line: recordLine, row: recordRow });
+      pos = end + 1;
+      seg = pos;
     }
-    if (parts === null) fieldValue = initial + text.slice(seg, endPos);
-    else {
-      parts.push(text.slice(seg, endPos));
-      fieldValue = initial + parts.join('');
-    }
-    fieldEnded = ended;
+    fieldValue = prefix;
+    fieldEnded = END;
   }
 
   function readQuoted() {
     const open = pos;
     const openLine = line;
-    pos += 1;
+    pos++;
     let value = '';
     let seg = pos;
-    let closed = false;
     while (pos < len) {
       const c = text.charCodeAt(pos);
       if (c === 34) {
-        if (text.charCodeAt(pos + 1) === 34) {
-          value += text.slice(seg, pos) + '"';
-          pos += 2;
-          seg = pos;
-          continue;
-        }
+        if (text.charCodeAt(pos + 1) === 34) { value += text.slice(seg, pos) + '"'; pos += 2; seg = pos; continue; }
         fieldValue = value === '' ? text.slice(seg, pos) : value + text.slice(seg, pos);
-        pos += 1;
-        closed = true;
-        break;
+        pos++;
+        if (pos >= len) { fieldEnded = END; return; }
+        const d = text.charCodeAt(pos);
+        if (d === 44) { pos++; fieldEnded = COMMA; return; }
+        if (d === 10) { pos++; line++; fieldEnded = LINE_BREAK; return; }
+        if (d === 13 && text.charCodeAt(pos + 1) === 10) { pos += 2; line++; fieldEnded = LINE_BREAK; return; }
+        const before = fieldValue.length;
+        readUnquoted(fieldValue);
+        if (fieldValue.length > before) errors.push({ code: 'quote_junk', line: recordLine, row: recordRow });
+        return;
       }
       if (c === 13) {
         value += text.slice(seg, pos) + '\n';
-        line += 1;
+        line++;
         pos += text.charCodeAt(pos + 1) === 10 ? 2 : 1;
         seg = pos;
         continue;
       }
-      if (c === 10) line += 1;
-      pos += 1;
+      if (c === 10) { line++; pos++; continue; }
+      pos++;
     }
-    if (!closed) {
-      pos = open + 1;
-      line = openLine;
-      addError('unterminated_quote');
-      readUnquoted('"');
-      return;
-    }
-    if (pos >= len) {
-      fieldEnded = END;
-      return;
-    }
-    const c = text.charCodeAt(pos);
-    if (c === 44) {
-      pos += 1;
-      fieldEnded = COMMA;
-      return;
-    }
-    if (c === 10) {
-      pos += 1;
-      line += 1;
-      fieldEnded = LINE_BREAK;
-      return;
-    }
-    if (c === 13 && text.charCodeAt(pos + 1) === 10) {
-      pos += 2;
-      line += 1;
-      fieldEnded = LINE_BREAK;
-      return;
-    }
-    const before = fieldValue.length;
-    readUnquoted(fieldValue);
-    if (fieldValue.length > before) addError('quote_junk');
+    pos = open + 1; line = openLine;
+    errors.push({ code: 'unterminated_quote', line: recordLine, row: recordRow });
+    readUnquoted('"');
   }
 
-  while (true) {
-    while (pos < len) {
-      const c = text.charCodeAt(pos);
-      if (c === 10) {
-        pos += 1;
-        line += 1;
-      } else if (c === 13 && text.charCodeAt(pos + 1) === 10) {
-        pos += 2;
-        line += 1;
-      } else {
-        break;
-      }
-    }
-    if (pos >= len) break;
+  while (pos < len) {
+    const c = text.charCodeAt(pos);
+    if (c === 10) { pos++; line++; continue; }
+    if (c === 13 && text.charCodeAt(pos + 1) === 10) { pos += 2; line++; continue; }
 
     recordLine = line;
     recordRow = header && columns === null ? null : rows.length;
+
+    if (c !== 34) {
+      let nl = text.indexOf('\n', pos); if (nl === -1) nl = len;
+      const qi = text.indexOf('"', pos);
+      if ((qi === -1 || qi >= nl)) {
+        const ri = text.indexOf('\r', pos);
+        if (ri === -1 || ri >= nl) {
+          const lineText = text.slice(pos, nl);
+          const fields = lineText.indexOf(',') === -1 ? [lineText] : lineText.split(',');
+          pos = nl < len ? nl + 1 : len;
+          line++;
+          fieldEnded = LINE_BREAK;
+          if (!(fields.length === 1 && fields[0] === '')) {
+            if (width < 0) width = fields.length;
+            if (header && columns === null) { columns = fields; }
+            else {
+              if (fields.length < width) {
+                errors.push({ code: 'short_row', line: recordLine, row: recordRow, fields: fields.length });
+                while (fields.length < width) fields.push('');
+              } else if (fields.length > width) {
+                errors.push({ code: 'long_row', line: recordLine, row: recordRow, extra: fields.slice(width) });
+                fields.length = width;
+              }
+              rows.push(fields);
+            }
+          }
+          continue;
+        }
+      }
+    }
+
     const fields = [];
     let quoted = false;
     do {
       quoted = text.charCodeAt(pos) === 34;
-      if (quoted) readQuoted();
-      else readUnquoted('');
+      if (quoted) readQuoted(); else readUnquoted('');
       fields.push(fieldValue);
     } while (fieldEnded === COMMA);
 
     if (fields.length === 1 && fields[0] === '' && !quoted) continue;
     if (width < 0) width = fields.length;
-    if (header && columns === null) {
-      columns = fields;
-      continue;
-    }
+    if (header && columns === null) { columns = fields; continue; }
     if (fields.length < width) {
       errors.push({ code: 'short_row', line: recordLine, row: recordRow, fields: fields.length });
       while (fields.length < width) fields.push('');

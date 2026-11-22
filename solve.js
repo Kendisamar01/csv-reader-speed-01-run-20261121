@@ -72,37 +72,25 @@ export function run(input) {
     const open = pos;
     const openLine = line;
     pos += 1;
-    let parts = null;
+    let value = '';
     let seg = pos;
     let closed = false;
     while (pos < len) {
       const c = text.charCodeAt(pos);
       if (c === 34) {
         if (text.charCodeAt(pos + 1) === 34) {
-          if (parts === null) parts = [text.slice(seg, pos), '"'];
-          else {
-            parts.push(text.slice(seg, pos));
-            parts.push('"');
-          }
+          value += text.slice(seg, pos) + '"';
           pos += 2;
           seg = pos;
           continue;
         }
-        if (parts === null) fieldValue = text.slice(seg, pos);
-        else {
-          parts.push(text.slice(seg, pos));
-          fieldValue = parts.join('');
-        }
+        fieldValue = value === '' ? text.slice(seg, pos) : value + text.slice(seg, pos);
         pos += 1;
         closed = true;
         break;
       }
       if (c === 13) {
-        if (parts === null) parts = [text.slice(seg, pos), '\n'];
-        else {
-          parts.push(text.slice(seg, pos));
-          parts.push('\n');
-        }
+        value += text.slice(seg, pos) + '\n';
         line += 1;
         pos += text.charCodeAt(pos + 1) === 10 ? 2 : 1;
         seg = pos;
